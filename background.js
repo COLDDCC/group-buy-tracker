@@ -5,18 +5,35 @@ const COLUMN_COUNT = 5; // 商品名称, 商品图片链接, 商品链接, 平�
 const LINK_OFFSET = 2; // 商品链接 is the 3rd of the 5 columns
 
 async function getSettings() {
-  const stored = await chrome.storage.sync.get([
-    "appId",
-    "appSecret",
-    "sheetUrl",
-    "colStart",
-    "headerRow",
+  // appId/appSecret are credentials — keep them in storage.local (this device only)
+  // instead of storage.sync (synced through the user's Google account).
+  const [local, synced] = await Promise.all([
+    chrome.storage.local.get(["appId", "appSecret"]),
+    chrome.storage.sync.get(["sheetUrl", "colStart", "headerRow", "holidayDates"]),
   ]);
-  return {
-    colStart: "A",
-    headerRow: 1,
-    ...stored,
-  };
+  return { colStart: "A", headerRow: 1, ...synced, ...local };
+}
+
+// Wraps a Feishu API call: surfaces network failures and non-JSON responses (proxy
+// errors, HTML error pages, etc.) as a readable message instead of a raw parse
+// exception, and turns a non-zero business `code` into a thrown Error uniformly.
+async function feishuRequest(url, options, context) {
+  let resp;
+  try {
+    resp = await fetch(url, options);
+  } catch (err) {
+    throw new Error(`${context}：网络请求失败（${err.message}）`);
+  }
+  let data;
+  try {
+    data = await resp.json();
+  } catch (err) {
+    throw new Error(`${context}：飞书返回了无法解析的内容（HTTP ${resp.status}）`);
+  }
+  if (data.code !== 0) {
+    throw new Error(`${context}：${data.msg || `错误码 ${data.code}`}`);
+  }
+  return data;
 }
 
 // tenant_access_token is valid for ~2h; cache it in memory (service worker can be
@@ -26,15 +43,15 @@ let tokenCache = { token: null, expiresAt: 0 };
 async function getTenantAccessToken(appId, appSecret) {
   if (tokenCache.token && Date.now() < tokenCache.expiresAt) return tokenCache.token;
 
-  const resp = await fetch(`${FEISHU_HOST}/open-apis/auth/v3/tenant_access_token/internal`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json; charset=utf-8" },
-    body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
-  });
-  const data = await resp.json();
-  if (data.code !== 0) {
-    throw new Error(`获取飞书 token 失败：${data.msg || data.code}`);
-  }
+  const data = await feishuRequest(
+    `${FEISHU_HOST}/open-apis/auth/v3/tenant_access_token/internal`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
+    },
+    "获取飞书 token 失败"
+  );
   tokenCache = { token: data.tenant_access_token, expiresAt: Date.now() + (data.expire - 60) * 1000 };
   return tokenCache.token;
 }
@@ -48,12 +65,11 @@ async function resolveSpreadsheetToken(token, parsed) {
   const cached = await chrome.storage.local.get(cacheKey);
   if (cached[cacheKey]) return cached[cacheKey];
 
-  const resp = await fetch(
+  const data = await feishuRequest(
     `${FEISHU_HOST}/open-apis/wiki/v2/spaces/get_node?token=${encodeURIComponent(parsed.token)}`,
-    { headers: { Authorization: `Bearer ${token}` } }
+    { headers: { Authorization: `Bearer ${token}` } },
+    "解析知识库链接失败"
   );
-  const data = await resp.json();
-  if (data.code !== 0) throw new Error(`解析知识库链接失败：${data.msg || data.code}`);
   const node = data.data && data.data.node;
   if (!node || !node.obj_token) throw new Error("知识库链接解析结果里没有找到表格");
   if (node.obj_type && node.obj_type !== "sheet") {
@@ -68,47 +84,51 @@ function sheetsUrl(spreadsheetToken, suffix) {
 }
 
 async function getSheetMeta(token, spreadsheetToken) {
-  const resp = await fetch(sheetsUrl(spreadsheetToken, "/metainfo"), {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const data = await resp.json();
-  if (data.code !== 0) throw new Error(`读取表格信息失败：${data.msg || data.code}`);
+  const data = await feishuRequest(
+    sheetsUrl(spreadsheetToken, "/metainfo"),
+    { headers: { Authorization: `Bearer ${token}` } },
+    "读取表格信息失败"
+  );
   return (data.data && data.data.sheets) || [];
 }
 
 async function readRange(token, spreadsheetToken, range) {
-  const resp = await fetch(sheetsUrl(spreadsheetToken, `/values/${encodeURIComponent(range)}`), {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const data = await resp.json();
-  if (data.code !== 0) throw new Error(`读取表格内容失败：${data.msg || data.code}`);
+  const data = await feishuRequest(
+    sheetsUrl(spreadsheetToken, `/values/${encodeURIComponent(range)}`),
+    { headers: { Authorization: `Bearer ${token}` } },
+    "读取表格内容失败"
+  );
   return (data.data && data.data.valueRange && data.data.valueRange.values) || [];
 }
 
 async function appendRow(token, spreadsheetToken, range, row) {
-  const resp = await fetch(sheetsUrl(spreadsheetToken, "/values_append?insertDataOption=INSERT_ROWS"), {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json; charset=utf-8",
+  await feishuRequest(
+    sheetsUrl(spreadsheetToken, "/values_append?insertDataOption=INSERT_ROWS"),
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify({ valueRange: { range, values: [row] } }),
     },
-    body: JSON.stringify({ valueRange: { range, values: [row] } }),
-  });
-  const data = await resp.json();
-  if (data.code !== 0) throw new Error(`新增行失败：${data.msg || data.code}`);
+    "新增行失败"
+  );
 }
 
 async function writeRange(token, spreadsheetToken, range, row) {
-  const resp = await fetch(sheetsUrl(spreadsheetToken, "/values"), {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json; charset=utf-8",
+  await feishuRequest(
+    sheetsUrl(spreadsheetToken, "/values"),
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify({ valueRange: { range, values: [row] } }),
     },
-    body: JSON.stringify({ valueRange: { range, values: [row] } }),
-  });
-  const data = await resp.json();
-  if (data.code !== 0) throw new Error(`更新行失败：${data.msg || data.code}`);
+    "更新行失败"
+  );
 }
 
 async function prepareSheetContext() {
@@ -123,30 +143,32 @@ async function prepareSheetContext() {
 
   const token = await getTenantAccessToken(appId, appSecret);
   const spreadsheetToken = await resolveSpreadsheetToken(token, parsed);
-  const colStartIndex = columnLetterToIndex(settings.colStart || "A");
+  const colStart = settings.colStart || "A";
+  const colStartIndex = columnLetterToIndex(colStart);
   const colEnd = indexToColumnLetter(colStartIndex + COLUMN_COUNT - 1);
   const headerRow = parseInt(settings.headerRow, 10) || 1;
 
-  return { token, spreadsheetToken, sheetId: parsed.sheetId, colStart: settings.colStart || "A", colEnd, headerRow };
+  return { token, spreadsheetToken, sheetId: parsed.sheetId, colStart, colEnd, headerRow };
 }
 
 async function saveRecord(payload) {
   const ctx = await prepareSheetContext();
   const { token, spreadsheetToken, sheetId, colStart, colEnd, headerRow } = ctx;
 
+  const link = normalizeLink(payload.link);
   const dataStartRow = headerRow + 1;
   const dataEndRow = dataStartRow + 4999;
   const readRangeStr = `${sheetId}!${colStart}${dataStartRow}:${colEnd}${dataEndRow}`;
   const rows = await readRange(token, spreadsheetToken, readRangeStr);
 
-  const existingIndex = rows.findIndex((r) => (r && r[LINK_OFFSET]) === payload.link);
+  const existingIndex = rows.findIndex((r) => (r && r[LINK_OFFSET]) === link);
 
   if (existingIndex !== -1) {
     const existing = rows[existingIndex] || [];
     const merged = [
       payload.name || existing[0] || "",
       payload.image || existing[1] || "",
-      payload.link || existing[2] || "",
+      link || existing[2] || "",
       payload.normalPrice != null ? payload.normalPrice : existing[3] ?? "",
       payload.weekendPrice != null ? payload.weekendPrice : existing[4] ?? "",
     ];
@@ -158,7 +180,7 @@ async function saveRecord(payload) {
   const newRow = [
     payload.name || "",
     payload.image || "",
-    payload.link || "",
+    link || "",
     payload.normalPrice ?? "",
     payload.weekendPrice ?? "",
   ];

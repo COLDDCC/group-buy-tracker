@@ -153,7 +153,7 @@ els.scrapeBtn.addEventListener("click", async () => {
     });
 
     els.name.value = result.name || "";
-    els.link.value = result.url || "";
+    els.link.value = normalizeLink(result.url || "");
     els.image.value = result.image || "";
     updateImagePreview();
 
@@ -181,7 +181,7 @@ els.form.addEventListener("submit", async (e) => {
   const payload = {
     name: els.name.value.trim(),
     image: els.image.value.trim(),
-    link: els.link.value.trim(),
+    link: normalizeLink(els.link.value.trim()),
     normalPrice: els.normalPrice.value === "" ? null : parseFloat(els.normalPrice.value),
     weekendPrice: els.weekendPrice.value === "" ? null : parseFloat(els.weekendPrice.value),
   };

@@ -1,4 +1,9 @@
-const FIELD_IDS = ["appId", "appSecret", "sheetUrl", "colStart", "headerRow", "holidayDates"];
+// appId/appSecret are credentials — stored in storage.local (this device only) so they
+// never leave the machine through Chrome sync. Everything else is just config and is
+// fine synced across the user's own devices.
+const LOCAL_FIELD_IDS = ["appId", "appSecret"];
+const SYNC_FIELD_IDS = ["sheetUrl", "colStart", "headerRow", "holidayDates"];
+const ALL_FIELD_IDS = [...LOCAL_FIELD_IDS, ...SYNC_FIELD_IDS];
 
 const DEFAULTS = {
   colStart: "A",
@@ -8,18 +13,23 @@ const DEFAULTS = {
 const statusEl = document.getElementById("status");
 
 async function load() {
-  const stored = await chrome.storage.sync.get(FIELD_IDS);
-  for (const id of FIELD_IDS) {
-    const value = stored[id] ?? DEFAULTS[id] ?? "";
-    document.getElementById(id).value = value;
+  const [local, synced] = await Promise.all([
+    chrome.storage.local.get(LOCAL_FIELD_IDS),
+    chrome.storage.sync.get(SYNC_FIELD_IDS),
+  ]);
+  const stored = { ...local, ...synced };
+  for (const id of ALL_FIELD_IDS) {
+    document.getElementById(id).value = stored[id] ?? DEFAULTS[id] ?? "";
   }
 }
 load();
 
-function collectValues() {
-  const values = {};
-  for (const id of FIELD_IDS) values[id] = document.getElementById(id).value.trim();
-  return values;
+async function persistValues() {
+  const local = {};
+  for (const id of LOCAL_FIELD_IDS) local[id] = document.getElementById(id).value.trim();
+  const synced = {};
+  for (const id of SYNC_FIELD_IDS) synced[id] = document.getElementById(id).value.trim();
+  await Promise.all([chrome.storage.local.set(local), chrome.storage.sync.set(synced)]);
 }
 
 document.getElementById("sheetUrl").addEventListener("blur", (e) => {
@@ -36,7 +46,7 @@ document.getElementById("sheetUrl").addEventListener("blur", (e) => {
 });
 
 document.getElementById("save").addEventListener("click", async () => {
-  await chrome.storage.sync.set(collectValues());
+  await persistValues();
   statusEl.textContent = "已保存 ✅";
   statusEl.className = "hint success";
 });
@@ -44,7 +54,7 @@ document.getElementById("save").addEventListener("click", async () => {
 document.getElementById("test").addEventListener("click", async () => {
   statusEl.textContent = "测试中…";
   statusEl.className = "hint";
-  await chrome.storage.sync.set(collectValues());
+  await persistValues();
 
   try {
     const response = await chrome.runtime.sendMessage({ type: "TEST_CONNECTION" });

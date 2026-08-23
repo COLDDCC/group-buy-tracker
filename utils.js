@@ -80,6 +80,44 @@ function parseSheetUrl(urlStr) {
   return null;
 }
 
+// Many product-page URLs carry per-visit tracking params (utm_*, spm, _t, share ids...)
+// that change every time you open the same link. Left alone, that breaks the "same
+// product link -> same row" matching in background.js: re-scraping an item you already
+// recorded would silently create a duplicate row instead of updating it. Strip the
+// common tracking keys (but leave everything else, since some sites put the real item
+// id in the query string) so the same product normalizes to the same link.
+const TRACKING_PARAM_NAMES = [
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "spm",
+  "scm",
+  "_t",
+  "timestamp",
+  "share_id",
+  "shareId",
+  "share_from",
+  "request_id",
+  "requestId",
+  "trace_id",
+  "traceId",
+  "from",
+];
+
+function normalizeLink(urlStr) {
+  if (!urlStr) return urlStr;
+  let u;
+  try {
+    u = new URL(urlStr);
+  } catch (e) {
+    return urlStr;
+  }
+  for (const key of TRACKING_PARAM_NAMES) u.searchParams.delete(key);
+  return u.toString();
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     parseHolidayList,
@@ -89,5 +127,6 @@ if (typeof module !== "undefined") {
     indexToColumnLetter,
     columnLetterToIndex,
     parseSheetUrl,
+    normalizeLink,
   };
 }
