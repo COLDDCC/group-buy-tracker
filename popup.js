@@ -93,7 +93,12 @@ function scrapeProductPage() {
   }
 
   function guessPrices() {
-    const priceRe = /[¥￥]\s?\d+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?\s?元/;
+    // Supports ¥/￥-prefixed prices, Chinese 元, and Japanese 円 (菌核屋/駿河屋-style
+    // shops price in yen, e.g. "150円（税込）" — no ¥ symbol at all), plus
+    // comma-grouped thousands like "1,500円".
+    const numberPattern = "\\d{1,3}(?:,\\d{3})*(?:\\.\\d{1,2})?";
+    const priceRe = new RegExp(`[¥￥]\\s?${numberPattern}|${numberPattern}\\s?(?:円|元)`);
+    const numberOnlyRe = new RegExp(`(${numberPattern})`);
     const candidates = [];
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let node;
@@ -104,9 +109,9 @@ function scrapeProductPage() {
       if (!parent) continue;
       const rect = parent.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) continue; // hidden
-      const match = text.match(/(\d+(?:\.\d{1,2})?)/);
+      const match = text.match(numberOnlyRe);
       if (!match) continue;
-      const value = parseFloat(match[1]);
+      const value = parseFloat(match[1].replace(/,/g, ""));
       if (!Number.isFinite(value) || value <= 0) continue;
       const fontSize = parseFloat(window.getComputedStyle(parent).fontSize) || 0;
       candidates.push({ value, fontSize, struck: isStruckThrough(parent), top: rect.top });
