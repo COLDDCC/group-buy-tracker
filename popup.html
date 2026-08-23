@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>代购团购收集助手</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>代购团购收集助手</h1>
+      <button id="openOptions" title="设置">⚙</button>
+    </header>
+
+    <button id="scrapeBtn" class="primary">抓取本页商品信息</button>
+    <p id="scrapeStatus" class="hint"></p>
+
+    <form id="recordForm">
+      <label>商品图片链接
+        <input type="url" id="image" placeholder="https://..." />
+      </label>
+      <img id="imagePreview" alt="" />
+
+      <label>商品名称
+        <input type="text" id="name" placeholder="商品名称" />
+      </label>
+
+      <label>商品链接
+        <input type="url" id="link" placeholder="https://..." />
+      </label>
+
+      <div class="price-row">
+        <label>平时价
+          <input type="number" step="0.01" id="normalPrice" placeholder="0.00" />
+        </label>
+        <label>周末/节假日价
+          <input type="number" step="0.01" id="weekendPrice" placeholder="0.00" />
+        </label>
+      </div>
+
+      <label class="checkbox">
+        <input type="checkbox" id="forceHoliday" />
+        今天按周末/节假日价格记录（未勾选则按今天日期自动判断）
+      </label>
+      <p id="dayTypeHint" class="hint"></p>
+
+      <button type="submit" class="primary">保存到多维表格</button>
+    </form>
+
+    <p id="saveStatus" class="hint"></p>
+
+    <script src="utils.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

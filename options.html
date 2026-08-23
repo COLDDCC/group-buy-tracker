@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>代购团购收集助手 - 设置</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <h1>代购团购收集助手 - 设置</h1>
+
+    <section>
+      <h2>1. 飞书自建应用</h2>
+      <p class="hint">
+        在
+        <a href="https://open.feishu.cn/app" target="_blank" rel="noopener">飞书开放平台</a>
+        创建一个「企业自建应用」，开通电子表格相关权限并发布，再把应用加为你这份表格的协作者。
+      </p>
+      <label>App ID <input type="text" id="appId" /></label>
+      <label>App Secret <input type="password" id="appSecret" /></label>
+    </section>
+
+    <section>
+      <h2>2. 表格链接</h2>
+      <p class="hint">
+        打开你要记录数据的那个分表标签页，直接把浏览器地址栏的完整链接复制过来，插件会自动解析。
+        支持知识库里嵌的电子表格（<code>/wiki/...?sheet=...</code>）和独立电子表格
+        （<code>/sheets/...?sheet=...</code>）两种链接。
+      </p>
+      <label>表格链接 <input type="text" id="sheetUrl" placeholder="https://xxx.feishu.cn/wiki/xxx?sheet=xxx" /></label>
+    </section>
+
+    <section>
+      <h2>3. 列位置</h2>
+      <p class="hint">
+        插件会按顺序写 5 列：<b>商品名称 / 商品图片链接 / 商品链接 / 平时价 / 周末价</b>，
+        从「起始列」开始往右连续排。团员名字请放在这 5 列之外（比如再往右一列），插件不会碰它。
+      </p>
+      <label>起始列（默认 A） <input type="text" id="colStart" placeholder="A" /></label>
+      <label>表头行号（默认 1，数据从下一行开始） <input type="text" id="headerRow" placeholder="1" /></label>
+    </section>
+
+    <section>
+      <h2>4. 节假日（可选）</h2>
+      <p class="hint">
+        插件默认只把周六、周日当作「周末价」，法定节假日（非周末的调休放假日）可以在这里补充，
+        逗号分隔，格式 2026-01-01,2026-02-16
+      </p>
+      <label>额外节假日日期 <input type="text" id="holidayDates" placeholder="2026-01-01,2026-02-16" /></label>
+    </section>
+
+    <div class="actions">
+      <button id="save" class="primary">保存设置</button>
+      <button id="test">测试连接</button>
+    </div>
+    <p id="status" class="hint"></p>
+
+    <script src="utils.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

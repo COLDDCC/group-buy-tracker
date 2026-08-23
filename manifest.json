@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "代购团购收集助手",
+  "version": "0.1.0",
+  "description": "在商品页面一键抓取图片/名称/价格，自动写入飞书多维表格；团员名字留空，后续手动核对填写。",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "代购团购收集助手"
+  },
+  "options_page": "options.html",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["https://open.feishu.cn/*"],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
