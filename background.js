@@ -18,10 +18,22 @@ async function getSettings() {
   return { headerRow: 1, ...COLUMN_DEFAULTS, ...synced, ...local };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRateLimitError(resp, data) {
+  if (resp.status === 429) return true;
+  const msg = (data && data.msg) || "";
+  return /too many request/i.test(msg);
+}
+
 // Wraps a Feishu API call: surfaces network failures and non-JSON responses (proxy
 // errors, HTML error pages, etc.) as a readable message instead of a raw parse
-// exception, and turns a non-zero business `code` into a thrown Error uniformly.
-async function feishuRequest(url, options, context) {
+// exception, turns a non-zero business `code` into a thrown Error uniformly, and
+// retries with backoff on rate-limit responses (Feishu's per-document write QPS limit
+// is easy to hit when saving several fields back to back).
+async function feishuRequest(url, options, context, attempt = 1) {
   let resp;
   try {
     resp = await fetch(url, options);
@@ -35,6 +47,10 @@ async function feishuRequest(url, options, context) {
     throw new Error(`${context}：飞书返回了无法解析的内容（HTTP ${resp.status}）`);
   }
   if (data.code !== 0) {
+    if (isRateLimitError(resp, data) && attempt < 4) {
+      await sleep(attempt * 800);
+      return feishuRequest(url, options, context, attempt + 1);
+    }
     throw new Error(`${context}：${data.msg || `错误码 ${data.code}`}`);
   }
   return data;
@@ -171,13 +187,15 @@ async function saveRecord(payload) {
   // Write each configured field to its own single cell — never touches columns the
   // user didn't map (manual-only columns like cn/个数/QQ号 stay untouched), and skips
   // any field left blank so it doesn't blank out a value already sitting in the sheet.
-  const writes = COLUMN_FIELD_IDS.filter((id) => columns[id] && fieldValues[id] !== null && fieldValues[id] !== undefined && fieldValues[id] !== "").map(
-    (id) => {
-      const col = columns[id];
-      return writeRange(token, spreadsheetToken, `${sheetId}!${col}${absoluteRow}:${col}${absoluteRow}`, [fieldValues[id]]);
-    }
+  // One at a time, not Promise.all: Feishu's per-document write QPS limit is easy to
+  // trip by firing several writes at the same instant.
+  const fieldsToWrite = COLUMN_FIELD_IDS.filter(
+    (id) => columns[id] && fieldValues[id] !== null && fieldValues[id] !== undefined && fieldValues[id] !== ""
   );
-  await Promise.all(writes);
+  for (const id of fieldsToWrite) {
+    const col = columns[id];
+    await writeRange(token, spreadsheetToken, `${sheetId}!${col}${absoluteRow}:${col}${absoluteRow}`, [fieldValues[id]]);
+  }
 
   return { updated };
 }
