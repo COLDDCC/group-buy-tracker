@@ -124,3 +124,22 @@ input[type="number"] {
 .hint.success {
   color: #1e8e3e;
 }
+
+#imageDebug.debug {
+  display: none;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #f7f7f7;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 10px;
+  color: #555;
+  max-height: 120px;
+  overflow-y: auto;
+  user-select: text;
+}
+
+#imageDebug.debug.visible {
+  display: block;
+}

@@ -121,6 +121,24 @@ async function readRange(token, spreadsheetToken, range) {
   return (data.data && data.data.valueRange && data.data.valueRange.values) || [];
 }
 
+// Diagnostic-only: returns the *raw* valueRange for a single cell (unlike readRange,
+// which throws everything away except .values) so we can see exactly what Feishu
+// stored for the IMAGE() formula cell — whether it came back with anything indicating
+// a live formula, or just the literal text. Never throws; a failed read just means no
+// debug info, which shouldn't block the save.
+async function readCellRaw(token, spreadsheetToken, range) {
+  try {
+    const data = await feishuRequest(
+      sheetsUrl(spreadsheetToken, `/values/${encodeURIComponent(range)}`),
+      { headers: { Authorization: `Bearer ${token}` } },
+      "读取单元格失败"
+    );
+    return JSON.stringify(data.data && data.data.valueRange);
+  } catch (err) {
+    return `读取失败：${err.message}`;
+  }
+}
+
 async function writeRange(token, spreadsheetToken, range, row) {
   await feishuRequest(
     sheetsUrl(spreadsheetToken, "/values"),
@@ -218,7 +236,16 @@ async function saveRecord(payload) {
     await writeRange(token, spreadsheetToken, `${sheetId}!${col}${absoluteRow}:${col}${absoluteRow}`, [fieldValues[id]]);
   }
 
-  return { updated, row: absoluteRow };
+  // Diagnostic: read the image cell straight back so the popup can show exactly what
+  // Feishu now has stored there — settles whether the IMAGE() string is being kept as
+  // a live formula or just literal text, instead of guessing from the outside.
+  let imageDebug = null;
+  if (fieldValues.colImage) {
+    const col = columns.colImage;
+    imageDebug = await readCellRaw(token, spreadsheetToken, `${sheetId}!${col}${absoluteRow}:${col}${absoluteRow}`);
+  }
+
+  return { updated, row: absoluteRow, imageDebug };
 }
 
 async function testConnection() {

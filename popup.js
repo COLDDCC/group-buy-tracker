@@ -11,6 +11,7 @@ const els = {
   forceHoliday: document.getElementById("forceHoliday"),
   dayTypeHint: document.getElementById("dayTypeHint"),
   saveStatus: document.getElementById("saveStatus"),
+  imageDebug: document.getElementById("imageDebug"),
   openOptions: document.getElementById("openOptions"),
 };
 
@@ -226,12 +227,22 @@ els.form.addEventListener("submit", async (e) => {
     return;
   }
 
+  els.imageDebug.textContent = "";
+  els.imageDebug.classList.remove("visible");
+
   try {
     const response = await chrome.runtime.sendMessage({ type: "SAVE_RECORD", payload });
     if (response && response.ok) {
       const where = response.row ? `（第 ${response.row} 行）` : "";
       els.saveStatus.textContent = (response.updated ? "已更新已有记录 ✅" : "已写入新记录 ✅") + where;
       els.saveStatus.className = "hint success";
+      // Feishu's raw response for the image cell, straight after writing it — lets you
+      // just screenshot this instead of digging through DevTools when the thumbnail
+      // doesn't show up.
+      if (response.imageDebug) {
+        els.imageDebug.textContent = "图片格子读回内容：" + response.imageDebug;
+        els.imageDebug.classList.add("visible");
+      }
     } else {
       throw new Error((response && response.error) || "未知错误");
     }
