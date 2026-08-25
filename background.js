@@ -172,9 +172,20 @@ async function saveRecord(payload) {
   const linkRows = await readRange(token, spreadsheetToken, linkColRange);
   const linkValues = linkRows.map((r) => (r && r[0]) || "");
 
+  // Feishu pads the response out to the full requested range instead of trimming
+  // trailing blank rows, so linkValues.length is NOT "how many rows have data" — it's
+  // always ~5000. Scan backward for the last actually-filled cell instead.
+  let lastFilledOffset = -1;
+  for (let i = linkValues.length - 1; i >= 0; i--) {
+    if (linkValues[i]) {
+      lastFilledOffset = i;
+      break;
+    }
+  }
+
   const existingIndex = linkValues.findIndex((v) => v === link);
   const updated = existingIndex !== -1;
-  const absoluteRow = updated ? dataStartRow + existingIndex : dataStartRow + linkValues.length;
+  const absoluteRow = updated ? dataStartRow + existingIndex : dataStartRow + lastFilledOffset + 1;
 
   const fieldValues = {
     colName: payload.name,
