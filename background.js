@@ -159,8 +159,13 @@ async function writeRange(token, spreadsheetToken, range, row) {
 // popup.js already rewrites 駿河屋's webp links to jpg before this ever sees them);
 // other sites' webp images will just show #VALUE! in this cell, same as any other
 // image Feishu can't fetch (hotlink-protected, too large, not actually public).
+//
+// A plain "=IMAGE(...)" string doesn't work through the /values write endpoint —
+// confirmed by the read-back debug output: Feishu treated it as a rich-text value
+// (the URL inside got auto-linkified into a `type: "url"` segment) instead of a
+// formula. The value has to explicitly say what it is.
 function imageFormula(url) {
-  return `=IMAGE("${url.replace(/"/g, "")}")`;
+  return { type: "formula", text: `=IMAGE("${url.replace(/"/g, "")}")` };
 }
 
 async function prepareSheetContext() {
