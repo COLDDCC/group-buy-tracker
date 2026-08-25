@@ -1,17 +1,21 @@
 importScripts("utils.js");
 
 const FEISHU_HOST = "https://open.feishu.cn";
-const COLUMN_COUNT = 5; // 商品名称, 商品图片链接, 商品链接, 平时价, 周末价 (in that order)
-const LINK_OFFSET = 2; // 商品链接 is the 3rd of the 5 columns
+
+// Each of the 5 fields the extension can write has its own column letter, independent
+// of the others — the user's sheet can interleave manual-only columns (cn/个数/QQ号...)
+// anywhere, and a field with no column configured is simply never written.
+const COLUMN_FIELD_IDS = ["colName", "colImage", "colLink", "colNormalPrice", "colWeekendPrice"];
+const COLUMN_DEFAULTS = { colName: "A", colImage: "B", colLink: "C", colNormalPrice: "D", colWeekendPrice: "E" };
 
 async function getSettings() {
   // appId/appSecret are credentials — keep them in storage.local (this device only)
   // instead of storage.sync (synced through the user's Google account).
   const [local, synced] = await Promise.all([
     chrome.storage.local.get(["appId", "appSecret"]),
-    chrome.storage.sync.get(["sheetUrl", "colStart", "headerRow", "holidayDates"]),
+    chrome.storage.sync.get(["sheetUrl", "headerRow", "holidayDates", ...COLUMN_FIELD_IDS]),
   ]);
-  return { colStart: "A", headerRow: 1, ...synced, ...local };
+  return { headerRow: 1, ...COLUMN_DEFAULTS, ...synced, ...local };
 }
 
 // Wraps a Feishu API call: surfaces network failures and non-JSON responses (proxy
@@ -101,21 +105,6 @@ async function readRange(token, spreadsheetToken, range) {
   return (data.data && data.data.valueRange && data.data.valueRange.values) || [];
 }
 
-async function appendRow(token, spreadsheetToken, range, row) {
-  await feishuRequest(
-    sheetsUrl(spreadsheetToken, "/values_append?insertDataOption=INSERT_ROWS"),
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json; charset=utf-8",
-      },
-      body: JSON.stringify({ valueRange: { range, values: [row] } }),
-    },
-    "新增行失败"
-  );
-}
-
 async function writeRange(token, spreadsheetToken, range, row) {
   await feishuRequest(
     sheetsUrl(spreadsheetToken, "/values"),
@@ -140,52 +129,57 @@ async function prepareSheetContext() {
   const parsed = parseSheetUrl(sheetUrl);
   if (!parsed) throw new Error("表格链接格式无法识别，请重新从浏览器地址栏复制完整链接");
   if (!parsed.sheetId) throw new Error("链接里没有 ?sheet=xxx 参数，请确认复制的是分表标签页的完整链接");
+  if (!settings.colLink) throw new Error("请先在插件设置里填「商品链接」对应的列，插件靠它去重");
 
   const token = await getTenantAccessToken(appId, appSecret);
   const spreadsheetToken = await resolveSpreadsheetToken(token, parsed);
-  const colStart = settings.colStart || "A";
-  const colStartIndex = columnLetterToIndex(colStart);
-  const colEnd = indexToColumnLetter(colStartIndex + COLUMN_COUNT - 1);
   const headerRow = parseInt(settings.headerRow, 10) || 1;
 
-  return { token, spreadsheetToken, sheetId: parsed.sheetId, colStart, colEnd, headerRow };
+  const columns = {};
+  for (const id of COLUMN_FIELD_IDS) columns[id] = (settings[id] || "").trim();
+
+  return { token, spreadsheetToken, sheetId: parsed.sheetId, headerRow, columns };
 }
 
 async function saveRecord(payload) {
   const ctx = await prepareSheetContext();
-  const { token, spreadsheetToken, sheetId, colStart, colEnd, headerRow } = ctx;
+  const { token, spreadsheetToken, sheetId, headerRow, columns } = ctx;
 
   const link = normalizeLink(payload.link);
   const dataStartRow = headerRow + 1;
   const dataEndRow = dataStartRow + 4999;
-  const readRangeStr = `${sheetId}!${colStart}${dataStartRow}:${colEnd}${dataEndRow}`;
-  const rows = await readRange(token, spreadsheetToken, readRangeStr);
 
-  const existingIndex = rows.findIndex((r) => (r && r[LINK_OFFSET]) === link);
+  // Only need the link column to find the matching row (or, if none matches, the next
+  // empty row to append at) — the other fields are written independently below, so
+  // there's no need to read them at all.
+  const linkColRange = `${sheetId}!${columns.colLink}${dataStartRow}:${columns.colLink}${dataEndRow}`;
+  const linkRows = await readRange(token, spreadsheetToken, linkColRange);
+  const linkValues = linkRows.map((r) => (r && r[0]) || "");
 
-  if (existingIndex !== -1) {
-    const existing = rows[existingIndex] || [];
-    const merged = [
-      payload.name || existing[0] || "",
-      payload.image || existing[1] || "",
-      link || existing[2] || "",
-      payload.normalPrice != null ? payload.normalPrice : existing[3] ?? "",
-      payload.weekendPrice != null ? payload.weekendPrice : existing[4] ?? "",
-    ];
-    const absoluteRow = dataStartRow + existingIndex;
-    await writeRange(token, spreadsheetToken, `${sheetId}!${colStart}${absoluteRow}:${colEnd}${absoluteRow}`, merged);
-    return { updated: true };
-  }
+  const existingIndex = linkValues.findIndex((v) => v === link);
+  const updated = existingIndex !== -1;
+  const absoluteRow = updated ? dataStartRow + existingIndex : dataStartRow + linkValues.length;
 
-  const newRow = [
-    payload.name || "",
-    payload.image || "",
-    link || "",
-    payload.normalPrice ?? "",
-    payload.weekendPrice ?? "",
-  ];
-  await appendRow(token, spreadsheetToken, `${sheetId}!${colStart}${dataStartRow}:${colEnd}${dataStartRow}`, newRow);
-  return { updated: false };
+  const fieldValues = {
+    colName: payload.name,
+    colImage: payload.image,
+    colLink: link,
+    colNormalPrice: payload.normalPrice,
+    colWeekendPrice: payload.weekendPrice,
+  };
+
+  // Write each configured field to its own single cell — never touches columns the
+  // user didn't map (manual-only columns like cn/个数/QQ号 stay untouched), and skips
+  // any field left blank so it doesn't blank out a value already sitting in the sheet.
+  const writes = COLUMN_FIELD_IDS.filter((id) => columns[id] && fieldValues[id] !== null && fieldValues[id] !== undefined && fieldValues[id] !== "").map(
+    (id) => {
+      const col = columns[id];
+      return writeRange(token, spreadsheetToken, `${sheetId}!${col}${absoluteRow}:${col}${absoluteRow}`, [fieldValues[id]]);
+    }
+  );
+  await Promise.all(writes);
+
+  return { updated };
 }
 
 async function testConnection() {

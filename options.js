@@ -2,11 +2,24 @@
 // never leave the machine through Chrome sync. Everything else is just config and is
 // fine synced across the user's own devices.
 const LOCAL_FIELD_IDS = ["appId", "appSecret"];
-const SYNC_FIELD_IDS = ["sheetUrl", "colStart", "headerRow", "holidayDates"];
+const SYNC_FIELD_IDS = [
+  "sheetUrl",
+  "colName",
+  "colImage",
+  "colLink",
+  "colNormalPrice",
+  "colWeekendPrice",
+  "headerRow",
+  "holidayDates",
+];
 const ALL_FIELD_IDS = [...LOCAL_FIELD_IDS, ...SYNC_FIELD_IDS];
 
 const DEFAULTS = {
-  colStart: "A",
+  colName: "A",
+  colImage: "B",
+  colLink: "C",
+  colNormalPrice: "D",
+  colWeekendPrice: "E",
   headerRow: "1",
 };
 

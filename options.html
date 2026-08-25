@@ -33,11 +33,22 @@
     <section>
       <h2>3. 列位置</h2>
       <p class="hint">
-        插件会按顺序写 5 列：<b>商品名称 / 商品图片链接 / 商品链接 / 平时价 / 周末价</b>，
-        从「起始列」开始往右连续排。团员名字请放在这 5 列之外（比如再往右一列），插件不会碰它。
+        5 个字段各自填一个列，想放哪列都行，不用挨着；哪个字段留空，插件就完全不碰那一列
+        （比如不想让插件写图片链接，把「商品图片链接列」清空就行）。中间随便插几列自己手填的信息
+        （团员、cn、个数、QQ号……）插件也不会动。
       </p>
-      <label>起始列（默认 A） <input type="text" id="colStart" placeholder="A" /></label>
+      <label>商品名称列 <input type="text" id="colName" placeholder="A" /></label>
+      <label>商品图片链接列 <input type="text" id="colImage" placeholder="B" /></label>
+      <label>商品链接列（插件靠这一列去重，必填） <input type="text" id="colLink" placeholder="C" /></label>
+      <label>平时价列 <input type="text" id="colNormalPrice" placeholder="D" /></label>
+      <label>周末/节假日价列 <input type="text" id="colWeekendPrice" placeholder="E" /></label>
       <label>表头行号（默认 1，数据从下一行开始） <input type="text" id="headerRow" placeholder="1" /></label>
+
+      <p class="hint">
+        表头随你怎么写怎么改，插件不看列名。如果还没想好，可以先在表格第 1 行抄一份类似这样的（照抄或者
+        自己删改都行）：
+      </p>
+      <p class="hint"><code>名称 | 图片 | 链接 | 平时价格 | 实际价格 | cn | 个数 | QQ号</code></p>
     </section>
 
     <section>
