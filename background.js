@@ -136,71 +136,13 @@ async function writeRange(token, spreadsheetToken, range, row) {
   );
 }
 
-const MIME_EXTENSIONS = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-  "image/gif": "gif",
-};
-
-// Feishu Sheets has no "image as a cell's literal value" API. What it does have —
-// confirmed by checking the official SDK source, since values_image (the endpoint the
-// previous version of this code guessed at) doesn't exist anywhere in it — is a
-// two-step "floating image" flow: upload the file to get a token, then anchor it over
-// a cell range. It floats on top of the grid rather than living inside the cell, so it
-// won't follow that row if the sheet gets sorted or filtered later.
-async function uploadImageMedia(token, spreadsheetToken, dataUrl, ext) {
-  const blob = await (await fetch(dataUrl)).blob();
-  const form = new FormData();
-  const fileName = `product.${ext}`;
-  form.append("file_name", fileName);
-  form.append("parent_type", "sheet_image");
-  form.append("parent_node", spreadsheetToken);
-  form.append("size", String(blob.size));
-  form.append("file", blob, fileName);
-
-  const data = await feishuRequest(
-    `${FEISHU_HOST}/open-apis/drive/v1/medias/upload_all`,
-    { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form },
-    "上传图片失败"
-  );
-  return data.data.file_token;
-}
-
-async function createFloatImage(token, spreadsheetToken, sheetId, range, fileToken) {
-  await feishuRequest(
-    `${FEISHU_HOST}/open-apis/sheets/v3/spreadsheets/${spreadsheetToken}/sheets/${sheetId}/float_images`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json; charset=utf-8",
-      },
-      body: JSON.stringify({
-        float_image_token: fileToken,
-        range,
-        width: 60,
-        height: 60,
-        offset_x: 0,
-        offset_y: 0,
-      }),
-    },
-    "放置图片失败"
-  );
-}
-
-// Embeds an actual image, anchored over a single cell, instead of just writing a
-// link. This whole flow is unverified against the live API (parent_type especially —
-// "sheet_image" is a best guess following Feishu's naming pattern elsewhere, not
-// something the SDK spells out) — if any step fails, the caller (saveRecord) catches
-// it and falls back to writing the plain image URL, so a wrong guess here degrades
-// rather than breaking the save.
-async function embedImageOverCell(token, spreadsheetToken, sheetId, range, dataUrl) {
-  const match = /^data:([^;]+);base64,/.exec(dataUrl);
-  if (!match) throw new Error("图片数据格式不对");
-  const ext = MIME_EXTENSIONS[match[1]] || "png";
-  const fileToken = await uploadImageMedia(token, spreadsheetToken, dataUrl, ext);
-  await createFloatImage(token, spreadsheetToken, sheetId, range, fileToken);
+// Feishu Sheets renders a thumbnail for a cell whose value is an IMAGE() formula —
+// confirmed by live testing. It does NOT support .webp images (fixWebpUrl in
+// popup.js already rewrites 駿河屋's webp links to jpg before this ever sees them);
+// other sites' webp images will just show #VALUE! in this cell, same as any other
+// image Feishu can't fetch (hotlink-protected, too large, not actually public).
+function imageFormula(url) {
+  return `=IMAGE("${url.replace(/"/g, "")}")`;
 }
 
 async function prepareSheetContext() {
@@ -261,41 +203,19 @@ async function saveRecord(payload) {
     colWeekendPrice: payload.weekendPrice,
   };
 
-  // Write each configured field (except the image, handled separately below) to its
-  // own single cell — never touches columns the user didn't map (manual-only columns
-  // like cn/个数/QQ号 stay untouched), and skips any field left blank so it doesn't
-  // blank out a value already sitting in the sheet. One at a time, not Promise.all:
-  // Feishu's per-document write QPS limit is easy to trip by firing several writes at
-  // the same instant.
+  if (payload.image) fieldValues.colImage = imageFormula(payload.image);
+
+  // Write each configured field to its own single cell — never touches columns the
+  // user didn't map (manual-only columns like cn/个数/QQ号 stay untouched), and skips
+  // any field left blank so it doesn't blank out a value already sitting in the sheet.
+  // One at a time, not Promise.all: Feishu's per-document write QPS limit is easy to
+  // trip by firing several writes at the same instant.
   const fieldsToWrite = COLUMN_FIELD_IDS.filter(
-    (id) => id !== "colImage" && columns[id] && fieldValues[id] !== null && fieldValues[id] !== undefined && fieldValues[id] !== ""
+    (id) => columns[id] && fieldValues[id] !== null && fieldValues[id] !== undefined && fieldValues[id] !== ""
   );
   for (const id of fieldsToWrite) {
     const col = columns[id];
     await writeRange(token, spreadsheetToken, `${sheetId}!${col}${absoluteRow}:${col}${absoluteRow}`, [fieldValues[id]]);
-  }
-
-  // Image column: try floating an actual thumbnail over the cell first, fall back to
-  // the plain link on any failure (unsupported format, size limit, endpoint not
-  // behaving as expected, etc.) so a bad guess about this API never blocks the rest
-  // of the save.
-  if (columns.colImage) {
-    const cellRange = `${columns.colImage}${absoluteRow}:${columns.colImage}${absoluteRow}`;
-    let embedded = false;
-    if (payload.imageDataUrl) {
-      try {
-        await embedImageOverCell(token, spreadsheetToken, sheetId, cellRange, payload.imageDataUrl);
-        embedded = true;
-      } catch (err) {
-        // Swallowed for the user (falls back to a plain link below), but logged so it
-        // shows up in the service worker's console for debugging this unverified API.
-        console.warn("图片贴图失败，退回存链接：", err.message);
-        embedded = false;
-      }
-    }
-    if (!embedded && payload.image) {
-      await writeRange(token, spreadsheetToken, `${sheetId}!${cellRange}`, [payload.image]);
-    }
   }
 
   return { updated, row: absoluteRow };

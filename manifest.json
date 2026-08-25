@@ -1,15 +1,15 @@
 {
   "manifest_version": 3,
   "name": "代购团购收集助手",
-  "version": "0.3.0",
-  "description": "在商品页面一键抓取图片/名称/价格，自动写入飞书电子表格并嵌入商品图片缩略图；团员名字留空，后续手动核对填写。",
+  "version": "0.4.0",
+  "description": "在商品页面一键抓取图片/名称/价格，自动写入飞书电子表格，图片用 IMAGE() 公式显示缩略图；团员名字留空，后续手动核对填写。",
   "action": {
     "default_popup": "popup.html",
     "default_title": "代购团购收集助手"
   },
   "options_page": "options.html",
   "permissions": ["storage", "activeTab", "scripting"],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": ["https://open.feishu.cn/*"],
   "background": {
     "service_worker": "background.js"
   }

@@ -45,44 +45,27 @@ function updateImagePreview() {
     els.imagePreview.classList.remove("visible");
   }
 }
-els.image.addEventListener("input", () => {
-  // Edited by hand — the fetched image bytes (if any) no longer necessarily match
-  // this URL, so stop trying to embed a thumbnail for it and fall back to plain text.
-  lastImageDataUrl = null;
-  updateImagePreview();
-});
+els.image.addEventListener("input", updateImagePreview);
 els.imagePreview.addEventListener("error", () => els.imagePreview.classList.remove("visible"));
-
-// Holds the base64 data: URL of the scraped product image, set by runScrape() and
-// sent alongside the plain image URL when saving so background.js can try embedding
-// an actual thumbnail into the sheet instead of just writing a link.
-let lastImageDataUrl = null;
 
 // --- scraping ------------------------------------------------------------
 
 // Injected into the product page. Must be self-contained (no closures over
 // popup.js variables) since chrome.scripting.executeScript serializes it.
-async function scrapeProductPage() {
-  const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // keep the runtime.sendMessage payload comfortably small
-
-  // Fetching from inside the page (rather than the extension's background) means the
-  // request goes out with this page's own Referer, which is what image CDNs with
-  // hotlink protection actually check — a background-script fetch would very likely
-  // get blocked instead.
-  async function imageUrlToDataUrl(url) {
+function scrapeProductPage() {
+  // Feishu's IMAGE() formula (used to render a thumbnail — see saveRecord in
+  // background.js) can't load .webp images. 驹河屋/suruga-ya serves both a jpg and a
+  // webp version of every product photo at predictable, swappable paths, so rewrite
+  // to the jpg one here rather than silently shipping a link that'll never render.
+  function fixWebpUrl(url) {
     try {
-      const resp = await fetch(url);
-      if (!resp.ok) return null;
-      const blob = await resp.blob();
-      if (!blob.type.startsWith("image/") || blob.size > MAX_IMAGE_BYTES) return null;
-      return await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => resolve(null);
-        reader.readAsDataURL(blob);
-      });
+      const u = new URL(url);
+      if (/(^|\.)suruga-ya\.jp$/i.test(u.hostname)) {
+        u.pathname = u.pathname.replace("/pics_webp/", "/pics_light/").replace(/\.webp$/i, "");
+      }
+      return u.toString();
     } catch (e) {
-      return null;
+      return url;
     }
   }
 
@@ -104,7 +87,7 @@ async function scrapeProductPage() {
 
   function guessImage() {
     const og = meta("og:image");
-    if (og) return og;
+    if (og) return fixWebpUrl(og);
     const imgs = Array.from(document.querySelectorAll("img")).filter((img) => {
       const r = img.getBoundingClientRect();
       return r.width >= 150 && r.height >= 150 && img.src;
@@ -114,7 +97,7 @@ async function scrapeProductPage() {
       const rb = b.getBoundingClientRect();
       return rb.width * rb.height - ra.width * ra.height;
     });
-    return imgs.length ? imgs[0].src : "";
+    return imgs.length ? fixWebpUrl(imgs[0].src) : "";
   }
 
   function isStruckThrough(el) {
@@ -169,13 +152,10 @@ async function scrapeProductPage() {
   }
 
   const prices = guessPrices();
-  const image = guessImage();
-  const imageDataUrl = image ? await imageUrlToDataUrl(image) : null;
   return {
     url: location.href,
     name: guessName(),
-    image,
-    imageDataUrl,
+    image: guessImage(),
     currentPrice: prices.current,
     originalPrice: prices.original,
   };
@@ -197,7 +177,6 @@ async function runScrape() {
     els.name.value = result.name || "";
     els.link.value = normalizeLink(result.url || "");
     els.image.value = result.image || "";
-    lastImageDataUrl = result.imageDataUrl || null;
     updateImagePreview();
 
     const isHoliday = els.forceHoliday.checked;
@@ -206,8 +185,7 @@ async function runScrape() {
     if (result.currentPrice != null) target.value = result.currentPrice;
     if (result.originalPrice != null && !other.value) other.value = result.originalPrice;
 
-    const imageNote = result.image && !lastImageDataUrl ? "（图片缩略图抓取失败，保存时会退回存链接）" : "";
-    els.scrapeStatus.textContent = "已自动抓取，请核对图片/名称/价格后再保存" + imageNote;
+    els.scrapeStatus.textContent = "已自动抓取，请核对图片/名称/价格后再保存";
     els.scrapeStatus.className = "hint success";
   } catch (err) {
     els.scrapeStatus.textContent = `抓取失败：${err.message}（可以手动填写各字段）`;
@@ -230,7 +208,6 @@ els.form.addEventListener("submit", async (e) => {
   const payload = {
     name: els.name.value.trim(),
     image: els.image.value.trim(),
-    imageDataUrl: lastImageDataUrl,
     link: normalizeLink(els.link.value.trim()),
     normalPrice: els.normalPrice.value === "" ? null : parseFloat(els.normalPrice.value),
     weekendPrice: els.weekendPrice.value === "" ? null : parseFloat(els.weekendPrice.value),
