@@ -143,28 +143,64 @@ const MIME_EXTENSIONS = {
   "image/gif": "gif",
 };
 
-// Embeds an actual image into a single cell (not a link) via Feishu's values_image
-// API. This endpoint is unverified against the live API — if Feishu rejects it or the
-// contract turns out to differ, the caller (saveRecord) catches the failure and falls
-// back to writing the plain image URL instead, so a wrong guess here degrades rather
-// than breaking the save.
-async function writeImageCell(token, spreadsheetToken, range, dataUrl) {
-  const match = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl);
-  if (!match) throw new Error("图片数据格式不对");
-  const [, mime, base64] = match;
-  const ext = MIME_EXTENSIONS[mime] || "png";
+// Feishu Sheets has no "image as a cell's literal value" API. What it does have —
+// confirmed by checking the official SDK source, since values_image (the endpoint the
+// previous version of this code guessed at) doesn't exist anywhere in it — is a
+// two-step "floating image" flow: upload the file to get a token, then anchor it over
+// a cell range. It floats on top of the grid rather than living inside the cell, so it
+// won't follow that row if the sheet gets sorted or filtered later.
+async function uploadImageMedia(token, spreadsheetToken, dataUrl, ext) {
+  const blob = await (await fetch(dataUrl)).blob();
+  const form = new FormData();
+  const fileName = `product.${ext}`;
+  form.append("file_name", fileName);
+  form.append("parent_type", "sheet_image");
+  form.append("parent_node", spreadsheetToken);
+  form.append("size", String(blob.size));
+  form.append("file", blob, fileName);
+
+  const data = await feishuRequest(
+    `${FEISHU_HOST}/open-apis/drive/v1/medias/upload_all`,
+    { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form },
+    "上传图片失败"
+  );
+  return data.data.file_token;
+}
+
+async function createFloatImage(token, spreadsheetToken, sheetId, range, fileToken) {
   await feishuRequest(
-    sheetsUrl(spreadsheetToken, "/values_image"),
+    `${FEISHU_HOST}/open-apis/sheets/v3/spreadsheets/${spreadsheetToken}/sheets/${sheetId}/float_images`,
     {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json; charset=utf-8",
       },
-      body: JSON.stringify({ range, image: base64, name: `product.${ext}` }),
+      body: JSON.stringify({
+        float_image_token: fileToken,
+        range,
+        width: 60,
+        height: 60,
+        offset_x: 0,
+        offset_y: 0,
+      }),
     },
-    "写入图片失败"
+    "放置图片失败"
   );
+}
+
+// Embeds an actual image, anchored over a single cell, instead of just writing a
+// link. This whole flow is unverified against the live API (parent_type especially —
+// "sheet_image" is a best guess following Feishu's naming pattern elsewhere, not
+// something the SDK spells out) — if any step fails, the caller (saveRecord) catches
+// it and falls back to writing the plain image URL, so a wrong guess here degrades
+// rather than breaking the save.
+async function embedImageOverCell(token, spreadsheetToken, sheetId, range, dataUrl) {
+  const match = /^data:([^;]+);base64,/.exec(dataUrl);
+  if (!match) throw new Error("图片数据格式不对");
+  const ext = MIME_EXTENSIONS[match[1]] || "png";
+  const fileToken = await uploadImageMedia(token, spreadsheetToken, dataUrl, ext);
+  await createFloatImage(token, spreadsheetToken, sheetId, range, fileToken);
 }
 
 async function prepareSheetContext() {
@@ -239,22 +275,26 @@ async function saveRecord(payload) {
     await writeRange(token, spreadsheetToken, `${sheetId}!${col}${absoluteRow}:${col}${absoluteRow}`, [fieldValues[id]]);
   }
 
-  // Image column: try embedding an actual thumbnail first, fall back to the plain
-  // link on any failure (unsupported format, size limit, endpoint not behaving as
-  // expected, etc.) so a bad guess about this API never blocks the rest of the save.
+  // Image column: try floating an actual thumbnail over the cell first, fall back to
+  // the plain link on any failure (unsupported format, size limit, endpoint not
+  // behaving as expected, etc.) so a bad guess about this API never blocks the rest
+  // of the save.
   if (columns.colImage) {
-    const imageRange = `${sheetId}!${columns.colImage}${absoluteRow}:${columns.colImage}${absoluteRow}`;
+    const cellRange = `${columns.colImage}${absoluteRow}:${columns.colImage}${absoluteRow}`;
     let embedded = false;
     if (payload.imageDataUrl) {
       try {
-        await writeImageCell(token, spreadsheetToken, imageRange, payload.imageDataUrl);
+        await embedImageOverCell(token, spreadsheetToken, sheetId, cellRange, payload.imageDataUrl);
         embedded = true;
       } catch (err) {
+        // Swallowed for the user (falls back to a plain link below), but logged so it
+        // shows up in the service worker's console for debugging this unverified API.
+        console.warn("图片贴图失败，退回存链接：", err.message);
         embedded = false;
       }
     }
     if (!embedded && payload.image) {
-      await writeRange(token, spreadsheetToken, imageRange, [payload.image]);
+      await writeRange(token, spreadsheetToken, `${sheetId}!${cellRange}`, [payload.image]);
     }
   }
 
