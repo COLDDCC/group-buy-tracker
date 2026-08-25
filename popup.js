@@ -145,12 +145,13 @@ function scrapeProductPage() {
   };
 }
 
-els.scrapeBtn.addEventListener("click", async () => {
+async function runScrape() {
   els.scrapeStatus.textContent = "抓取中…";
   els.scrapeStatus.className = "hint";
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab || !tab.id) throw new Error("找不到当前标签页");
+    if (!/^https?:/.test(tab.url || "")) throw new Error("这不是普通网页，插件抓不了（比如浏览器内置页面）");
 
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -168,13 +169,18 @@ els.scrapeBtn.addEventListener("click", async () => {
     if (result.currentPrice != null) target.value = result.currentPrice;
     if (result.originalPrice != null && !other.value) other.value = result.originalPrice;
 
-    els.scrapeStatus.textContent = "抓取完成，请核对图片/名称/价格后再保存";
+    els.scrapeStatus.textContent = "已自动抓取，请核对图片/名称/价格后再保存";
     els.scrapeStatus.className = "hint success";
   } catch (err) {
     els.scrapeStatus.textContent = `抓取失败：${err.message}（可以手动填写各字段）`;
     els.scrapeStatus.className = "hint error";
   }
-});
+}
+
+// Popup打开时就自动抓一次，不用等用户点按钮；按钮留着给页面内容后加载完（比如图片懒加载）时手动
+// 重新抓一遍用。
+runScrape();
+els.scrapeBtn.addEventListener("click", runScrape);
 
 // --- save ------------------------------------------------------------------
 
