@@ -55,7 +55,7 @@ els.imagePreview.addEventListener("error", () => els.imagePreview.classList.remo
 // popup.js variables) since chrome.scripting.executeScript serializes it.
 function scrapeProductPage() {
   // Feishu's IMAGE() formula (used to render a thumbnail — see saveRecord in
-  // background.js) can't load .webp images. 驹河屋/suruga-ya serves both a jpg and a
+  // background.js) can't load .webp images. 骏河屋/suruga-ya serves both a jpg and a
   // webp version of every product photo at predictable, swappable paths, so rewrite
   // to the jpg one here rather than silently shipping a link that'll never render.
   function fixWebpUrl(url) {
@@ -110,7 +110,7 @@ function scrapeProductPage() {
   }
 
   function guessPrices() {
-    // Supports ¥/￥-prefixed prices, Chinese 元, and Japanese 円 (菌核屋/駿河屋-style
+    // Supports ¥/￥-prefixed prices, Chinese 元, and Japanese 円 (骏河屋/suruga-ya.jp-style
     // shops price in yen, e.g. "150円（税込）" — no ¥ symbol at all), plus
     // comma-grouped thousands like "1,500円".
     const numberPattern = "\\d{1,3}(?:,\\d{3})*(?:\\.\\d{1,2})?";

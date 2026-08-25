@@ -21,7 +21,7 @@ function toDateKey(date) {
   return `${y}-${m}-${d}`;
 }
 
-// Weekend/holiday pricing at 菌核屋 is inferred from *when* the item was scraped, not
+// Weekend/holiday pricing at 骏河屋 is inferred from *when* the item was scraped, not
 // read directly off the page (the page only ever shows one "current" price). Sat/Sun
 // count automatically; extra public holidays can be added in the options page.
 function isWeekendOrHoliday(date, holidaySet) {
