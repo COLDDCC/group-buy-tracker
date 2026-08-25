@@ -197,6 +197,13 @@ els.form.addEventListener("submit", async (e) => {
     weekendPrice: els.weekendPrice.value === "" ? null : parseFloat(els.weekendPrice.value),
   };
 
+  // "实际价格" defaults to the same number as "平时价" when there's no active
+  // discount — leaving it blank isn't "no data", it's "same as normal", so don't
+  // make the user retype the same number by hand every time.
+  if (payload.weekendPrice == null && payload.normalPrice != null) {
+    payload.weekendPrice = payload.normalPrice;
+  }
+
   if (!payload.name || !payload.link) {
     els.saveStatus.textContent = "商品名称和商品链接不能为空";
     els.saveStatus.className = "hint error";
@@ -206,7 +213,8 @@ els.form.addEventListener("submit", async (e) => {
   try {
     const response = await chrome.runtime.sendMessage({ type: "SAVE_RECORD", payload });
     if (response && response.ok) {
-      els.saveStatus.textContent = response.updated ? "已更新已有记录 ✅" : "已写入新记录 ✅";
+      const where = response.row ? `（第 ${response.row} 行）` : "";
+      els.saveStatus.textContent = (response.updated ? "已更新已有记录 ✅" : "已写入新记录 ✅") + where;
       els.saveStatus.className = "hint success";
     } else {
       throw new Error((response && response.error) || "未知错误");

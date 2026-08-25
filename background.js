@@ -197,7 +197,7 @@ async function saveRecord(payload) {
     await writeRange(token, spreadsheetToken, `${sheetId}!${col}${absoluteRow}:${col}${absoluteRow}`, [fieldValues[id]]);
   }
 
-  return { updated };
+  return { updated, row: absoluteRow };
 }
 
 async function testConnection() {
