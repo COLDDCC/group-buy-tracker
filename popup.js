@@ -45,14 +45,47 @@ function updateImagePreview() {
     els.imagePreview.classList.remove("visible");
   }
 }
-els.image.addEventListener("input", updateImagePreview);
+els.image.addEventListener("input", () => {
+  // Edited by hand — the fetched image bytes (if any) no longer necessarily match
+  // this URL, so stop trying to embed a thumbnail for it and fall back to plain text.
+  lastImageDataUrl = null;
+  updateImagePreview();
+});
 els.imagePreview.addEventListener("error", () => els.imagePreview.classList.remove("visible"));
+
+// Holds the base64 data: URL of the scraped product image, set by runScrape() and
+// sent alongside the plain image URL when saving so background.js can try embedding
+// an actual thumbnail into the sheet instead of just writing a link.
+let lastImageDataUrl = null;
 
 // --- scraping ------------------------------------------------------------
 
 // Injected into the product page. Must be self-contained (no closures over
 // popup.js variables) since chrome.scripting.executeScript serializes it.
-function scrapeProductPage() {
+async function scrapeProductPage() {
+  const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // keep the runtime.sendMessage payload comfortably small
+
+  // Fetching from inside the page (rather than the extension's background) means the
+  // request goes out with this page's own Referer, which is what image CDNs with
+  // hotlink protection actually check — a background-script fetch would very likely
+  // get blocked instead.
+  async function imageUrlToDataUrl(url) {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) return null;
+      const blob = await resp.blob();
+      if (!blob.type.startsWith("image/") || blob.size > MAX_IMAGE_BYTES) return null;
+      return await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+    } catch (e) {
+      return null;
+    }
+  }
+
   function meta(name) {
     const el =
       document.querySelector(`meta[property="${name}"]`) ||
@@ -136,10 +169,13 @@ function scrapeProductPage() {
   }
 
   const prices = guessPrices();
+  const image = guessImage();
+  const imageDataUrl = image ? await imageUrlToDataUrl(image) : null;
   return {
     url: location.href,
     name: guessName(),
-    image: guessImage(),
+    image,
+    imageDataUrl,
     currentPrice: prices.current,
     originalPrice: prices.original,
   };
@@ -161,6 +197,7 @@ async function runScrape() {
     els.name.value = result.name || "";
     els.link.value = normalizeLink(result.url || "");
     els.image.value = result.image || "";
+    lastImageDataUrl = result.imageDataUrl || null;
     updateImagePreview();
 
     const isHoliday = els.forceHoliday.checked;
@@ -169,7 +206,8 @@ async function runScrape() {
     if (result.currentPrice != null) target.value = result.currentPrice;
     if (result.originalPrice != null && !other.value) other.value = result.originalPrice;
 
-    els.scrapeStatus.textContent = "已自动抓取，请核对图片/名称/价格后再保存";
+    const imageNote = result.image && !lastImageDataUrl ? "（图片缩略图抓取失败，保存时会退回存链接）" : "";
+    els.scrapeStatus.textContent = "已自动抓取，请核对图片/名称/价格后再保存" + imageNote;
     els.scrapeStatus.className = "hint success";
   } catch (err) {
     els.scrapeStatus.textContent = `抓取失败：${err.message}（可以手动填写各字段）`;
@@ -192,6 +230,7 @@ els.form.addEventListener("submit", async (e) => {
   const payload = {
     name: els.name.value.trim(),
     image: els.image.value.trim(),
+    imageDataUrl: lastImageDataUrl,
     link: normalizeLink(els.link.value.trim()),
     normalPrice: els.normalPrice.value === "" ? null : parseFloat(els.normalPrice.value),
     weekendPrice: els.weekendPrice.value === "" ? null : parseFloat(els.weekendPrice.value),

@@ -136,6 +136,37 @@ async function writeRange(token, spreadsheetToken, range, row) {
   );
 }
 
+const MIME_EXTENSIONS = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+};
+
+// Embeds an actual image into a single cell (not a link) via Feishu's values_image
+// API. This endpoint is unverified against the live API — if Feishu rejects it or the
+// contract turns out to differ, the caller (saveRecord) catches the failure and falls
+// back to writing the plain image URL instead, so a wrong guess here degrades rather
+// than breaking the save.
+async function writeImageCell(token, spreadsheetToken, range, dataUrl) {
+  const match = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl);
+  if (!match) throw new Error("图片数据格式不对");
+  const [, mime, base64] = match;
+  const ext = MIME_EXTENSIONS[mime] || "png";
+  await feishuRequest(
+    sheetsUrl(spreadsheetToken, "/values_image"),
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify({ range, image: base64, name: `product.${ext}` }),
+    },
+    "写入图片失败"
+  );
+}
+
 async function prepareSheetContext() {
   const settings = await getSettings();
   const { appId, appSecret, sheetUrl } = settings;
@@ -189,23 +220,42 @@ async function saveRecord(payload) {
 
   const fieldValues = {
     colName: payload.name,
-    colImage: payload.image,
     colLink: link,
     colNormalPrice: payload.normalPrice,
     colWeekendPrice: payload.weekendPrice,
   };
 
-  // Write each configured field to its own single cell — never touches columns the
-  // user didn't map (manual-only columns like cn/个数/QQ号 stay untouched), and skips
-  // any field left blank so it doesn't blank out a value already sitting in the sheet.
-  // One at a time, not Promise.all: Feishu's per-document write QPS limit is easy to
-  // trip by firing several writes at the same instant.
+  // Write each configured field (except the image, handled separately below) to its
+  // own single cell — never touches columns the user didn't map (manual-only columns
+  // like cn/个数/QQ号 stay untouched), and skips any field left blank so it doesn't
+  // blank out a value already sitting in the sheet. One at a time, not Promise.all:
+  // Feishu's per-document write QPS limit is easy to trip by firing several writes at
+  // the same instant.
   const fieldsToWrite = COLUMN_FIELD_IDS.filter(
-    (id) => columns[id] && fieldValues[id] !== null && fieldValues[id] !== undefined && fieldValues[id] !== ""
+    (id) => id !== "colImage" && columns[id] && fieldValues[id] !== null && fieldValues[id] !== undefined && fieldValues[id] !== ""
   );
   for (const id of fieldsToWrite) {
     const col = columns[id];
     await writeRange(token, spreadsheetToken, `${sheetId}!${col}${absoluteRow}:${col}${absoluteRow}`, [fieldValues[id]]);
+  }
+
+  // Image column: try embedding an actual thumbnail first, fall back to the plain
+  // link on any failure (unsupported format, size limit, endpoint not behaving as
+  // expected, etc.) so a bad guess about this API never blocks the rest of the save.
+  if (columns.colImage) {
+    const imageRange = `${sheetId}!${columns.colImage}${absoluteRow}:${columns.colImage}${absoluteRow}`;
+    let embedded = false;
+    if (payload.imageDataUrl) {
+      try {
+        await writeImageCell(token, spreadsheetToken, imageRange, payload.imageDataUrl);
+        embedded = true;
+      } catch (err) {
+        embedded = false;
+      }
+    }
+    if (!embedded && payload.image) {
+      await writeRange(token, spreadsheetToken, imageRange, [payload.image]);
+    }
   }
 
   return { updated, row: absoluteRow };
