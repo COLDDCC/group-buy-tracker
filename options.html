@@ -2,11 +2,11 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <title>代购团购收集助手 - 设置</title>
+    <title>骏和屋代购记录助手 - 设置</title>
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
-    <h1>代购团购收集助手 - 设置</h1>
+    <h1>骏和屋代购记录助手 - 设置</h1>
 
     <section>
       <h2>1. 飞书自建应用</h2>
@@ -40,8 +40,8 @@
       <label>商品名称列 <input type="text" id="colName" placeholder="A" /></label>
       <label>商品图片链接列 <input type="text" id="colImage" placeholder="B" /></label>
       <label>商品链接列（插件靠这一列去重，必填） <input type="text" id="colLink" placeholder="C" /></label>
-      <label>平时价列 <input type="text" id="colNormalPrice" placeholder="D" /></label>
-      <label>周末/节假日价列 <input type="text" id="colWeekendPrice" placeholder="E" /></label>
+      <label>平时价格列 <input type="text" id="colNormalPrice" placeholder="D" /></label>
+      <label>实际价格列 <input type="text" id="colActualPrice" placeholder="E" /></label>
       <label>表头行号（默认 1，数据从下一行开始） <input type="text" id="headerRow" placeholder="1" /></label>
 
       <p class="hint">
@@ -49,15 +49,6 @@
         自己删改都行）：
       </p>
       <p class="hint"><code>名称 | 图片 | 链接 | 平时价格 | 实际价格 | cn | 个数 | QQ号</code></p>
-    </section>
-
-    <section>
-      <h2>4. 节假日（可选）</h2>
-      <p class="hint">
-        插件默认只把周六、周日当作「周末价」，法定节假日（非周末的调休放假日）可以在这里补充，
-        逗号分隔，格式 2026-01-01,2026-02-16
-      </p>
-      <label>额外节假日日期 <input type="text" id="holidayDates" placeholder="2026-01-01,2026-02-16" /></label>
     </section>
 
     <div class="actions">

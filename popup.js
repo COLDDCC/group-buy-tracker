@@ -7,33 +7,13 @@ const els = {
   name: document.getElementById("name"),
   link: document.getElementById("link"),
   normalPrice: document.getElementById("normalPrice"),
-  weekendPrice: document.getElementById("weekendPrice"),
-  forceHoliday: document.getElementById("forceHoliday"),
-  dayTypeHint: document.getElementById("dayTypeHint"),
+  actualPrice: document.getElementById("actualPrice"),
   saveStatus: document.getElementById("saveStatus"),
   imageDebug: document.getElementById("imageDebug"),
   openOptions: document.getElementById("openOptions"),
 };
 
 els.openOptions.addEventListener("click", () => chrome.runtime.openOptionsPage());
-
-// --- day-type banner -------------------------------------------------------
-
-async function refreshDayTypeHint() {
-  const { holidayDates = "" } = await chrome.storage.sync.get("holidayDates");
-  const holidaySet = parseHolidayList(holidayDates);
-  const auto = isWeekendOrHoliday(new Date(), holidaySet);
-  els.forceHoliday.checked = auto;
-  els.dayTypeHint.textContent = auto
-    ? "今天自动判定为「周末/节假日」，抓取到的价格会先填进周末价"
-    : "今天自动判定为「平时」，抓取到的价格会先填进平时价";
-}
-refreshDayTypeHint();
-els.forceHoliday.addEventListener("change", () => {
-  els.dayTypeHint.textContent = els.forceHoliday.checked
-    ? "已手动切换为「周末/节假日」"
-    : "已手动切换为「平时」";
-});
 
 // --- image preview -----------------------------------------------------
 
@@ -180,11 +160,14 @@ async function runScrape() {
     els.image.value = result.image || "";
     updateImagePreview();
 
-    const isHoliday = els.forceHoliday.checked;
-    const target = isHoliday ? els.weekendPrice : els.normalPrice;
-    const other = isHoliday ? els.normalPrice : els.weekendPrice;
-    if (result.currentPrice != null) target.value = result.currentPrice;
-    if (result.originalPrice != null && !other.value) other.value = result.originalPrice;
+    // "平时价格" is the regular/struck-through price if the page shows one, "实际价格"
+    // is what you'd actually pay right now. When the page only has one price (no
+    // discount running), both fields get that same number instead of one being left
+    // blank.
+    const normal = result.originalPrice != null ? result.originalPrice : result.currentPrice;
+    const actual = result.currentPrice != null ? result.currentPrice : result.originalPrice;
+    if (normal != null) els.normalPrice.value = normal;
+    if (actual != null) els.actualPrice.value = actual;
 
     els.scrapeStatus.textContent = "已自动抓取，请核对图片/名称/价格后再保存";
     els.scrapeStatus.className = "hint success";
@@ -211,14 +194,15 @@ els.form.addEventListener("submit", async (e) => {
     image: els.image.value.trim(),
     link: normalizeLink(els.link.value.trim()),
     normalPrice: els.normalPrice.value === "" ? null : parseFloat(els.normalPrice.value),
-    weekendPrice: els.weekendPrice.value === "" ? null : parseFloat(els.weekendPrice.value),
+    actualPrice: els.actualPrice.value === "" ? null : parseFloat(els.actualPrice.value),
   };
 
-  // "实际价格" defaults to the same number as "平时价" when there's no active
-  // discount — leaving it blank isn't "no data", it's "same as normal", so don't
-  // make the user retype the same number by hand every time.
-  if (payload.weekendPrice == null && payload.normalPrice != null) {
-    payload.weekendPrice = payload.normalPrice;
+  // If only one of the two price fields got filled in, mirror it into the other one —
+  // there's no case where "only one price exists" should mean leaving a cell blank.
+  if (payload.actualPrice == null && payload.normalPrice != null) {
+    payload.actualPrice = payload.normalPrice;
+  } else if (payload.normalPrice == null && payload.actualPrice != null) {
+    payload.normalPrice = payload.actualPrice;
   }
 
   if (!payload.name || !payload.link) {
