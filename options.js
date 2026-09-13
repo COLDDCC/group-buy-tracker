@@ -8,9 +8,8 @@ const SYNC_FIELD_IDS = [
   "colImage",
   "colLink",
   "colNormalPrice",
-  "colWeekendPrice",
+  "colActualPrice",
   "headerRow",
-  "holidayDates",
 ];
 const ALL_FIELD_IDS = [...LOCAL_FIELD_IDS, ...SYNC_FIELD_IDS];
 
@@ -19,7 +18,7 @@ const DEFAULTS = {
   colImage: "B",
   colLink: "C",
   colNormalPrice: "D",
-  colWeekendPrice: "E",
+  colActualPrice: "E",
   headerRow: "1",
 };
 

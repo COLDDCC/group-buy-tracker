@@ -5,15 +5,15 @@ const FEISHU_HOST = "https://open.feishu.cn";
 // Each of the 5 fields the extension can write has its own column letter, independent
 // of the others — the user's sheet can interleave manual-only columns (cn/个数/QQ号...)
 // anywhere, and a field with no column configured is simply never written.
-const COLUMN_FIELD_IDS = ["colName", "colImage", "colLink", "colNormalPrice", "colWeekendPrice"];
-const COLUMN_DEFAULTS = { colName: "A", colImage: "B", colLink: "C", colNormalPrice: "D", colWeekendPrice: "E" };
+const COLUMN_FIELD_IDS = ["colName", "colImage", "colLink", "colNormalPrice", "colActualPrice"];
+const COLUMN_DEFAULTS = { colName: "A", colImage: "B", colLink: "C", colNormalPrice: "D", colActualPrice: "E" };
 
 async function getSettings() {
   // appId/appSecret are credentials — keep them in storage.local (this device only)
   // instead of storage.sync (synced through the user's Google account).
   const [local, synced] = await Promise.all([
     chrome.storage.local.get(["appId", "appSecret"]),
-    chrome.storage.sync.get(["sheetUrl", "headerRow", "holidayDates", ...COLUMN_FIELD_IDS]),
+    chrome.storage.sync.get(["sheetUrl", "headerRow", ...COLUMN_FIELD_IDS]),
   ]);
   return { headerRow: 1, ...COLUMN_DEFAULTS, ...synced, ...local };
 }
@@ -223,7 +223,7 @@ async function saveRecord(payload) {
     colName: payload.name,
     colLink: link,
     colNormalPrice: payload.normalPrice,
-    colWeekendPrice: payload.weekendPrice,
+    colActualPrice: payload.actualPrice,
   };
 
   if (payload.image) fieldValues.colImage = imageFormula(payload.image);

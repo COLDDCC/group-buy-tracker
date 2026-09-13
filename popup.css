@@ -84,18 +84,6 @@ input[type="number"] {
   flex: 1;
 }
 
-.checkbox {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  margin-top: 10px;
-}
-
-.checkbox input {
-  margin: 0;
-}
-
 #imagePreview {
   max-width: 100%;
   max-height: 100px;
