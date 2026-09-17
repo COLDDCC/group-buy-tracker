@@ -220,11 +220,12 @@ els.form.addEventListener("submit", async (e) => {
       const where = response.row ? `（第 ${response.row} 行）` : "";
       els.saveStatus.textContent = (response.updated ? "已更新已有记录 ✅" : "已写入新记录 ✅") + where;
       els.saveStatus.className = "hint success";
-      // Feishu's raw response for the image cell, straight after writing it — lets you
-      // just screenshot this instead of digging through DevTools when the thumbnail
-      // doesn't show up.
+      // Extra detail about the image field, straight after writing it — for 电子表格
+      // this is Feishu's raw read-back of the cell, for 多维表格 it's an upload error
+      // (if any). Lets you just screenshot this instead of digging through DevTools
+      // when the thumbnail doesn't show up.
       if (response.imageDebug) {
-        els.imageDebug.textContent = "图片格子读回内容：" + response.imageDebug;
+        els.imageDebug.textContent = response.imageDebug;
         els.imageDebug.classList.add("visible");
       }
     } else {

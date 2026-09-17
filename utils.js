@@ -10,11 +10,17 @@ function extractPriceNumber(text) {
   return Number.isFinite(n) ? n : null;
 }
 
-// Feishu 电子表格 links come in two shapes:
-//   - embedded in a Wiki (知识库): https://xxx.feishu.cn/wiki/<node_token>?sheet=<sheetId>
-//     the node_token is NOT the spreadsheetToken — it has to be resolved via the wiki API.
-//   - a standalone spreadsheet: https://xxx.feishu.cn/sheets/<spreadsheetToken>?sheet=<sheetId>
-//     the token in the path IS already the spreadsheetToken.
+// Feishu links come in four shapes, for two different products (电子表格 Sheets vs.
+// 多维表格 Bitable) that each also come in a "standalone" and a "embedded in a Wiki"
+// flavor:
+//   - sheets, standalone:      https://xxx.feishu.cn/sheets/<spreadsheetToken>?sheet=<sheetId>
+//   - sheets, embedded in wiki: https://xxx.feishu.cn/wiki/<node_token>?sheet=<sheetId>
+//   - bitable, standalone:     https://xxx.feishu.cn/base/<appToken>?table=<tableId>&view=...
+//   - bitable, embedded in wiki: https://xxx.feishu.cn/wiki/<node_token>?table=<tableId>&view=...
+// A wiki node_token is NOT the underlying spreadsheetToken/appToken — it has to be
+// resolved via the wiki API (see resolveObjToken in background.js). The product for a
+// wiki link is told apart by which query param is present (?sheet= vs ?table=), since
+// the /wiki/ path alone doesn't say which product is behind it.
 function parseSheetUrl(urlStr) {
   let u;
   try {
@@ -23,10 +29,18 @@ function parseSheetUrl(urlStr) {
     return null;
   }
   const sheetId = u.searchParams.get("sheet") || "";
+  const tableId = u.searchParams.get("table") || "";
   const wikiMatch = u.pathname.match(/\/wiki\/([^/?]+)/);
   const sheetsMatch = u.pathname.match(/\/sheets\/([^/?]+)/);
-  if (wikiMatch) return { type: "wiki", token: wikiMatch[1], sheetId };
-  if (sheetsMatch) return { type: "sheets", token: sheetsMatch[1], sheetId };
+  const baseMatch = u.pathname.match(/\/base\/([^/?]+)/);
+
+  if (baseMatch) return { product: "bitable", isWiki: false, token: baseMatch[1], tableId };
+  if (wikiMatch) {
+    return tableId
+      ? { product: "bitable", isWiki: true, token: wikiMatch[1], tableId }
+      : { product: "sheets", isWiki: true, token: wikiMatch[1], sheetId };
+  }
+  if (sheetsMatch) return { product: "sheets", isWiki: false, token: sheetsMatch[1], sheetId };
   return null;
 }
 

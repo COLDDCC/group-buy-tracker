@@ -13,7 +13,9 @@
       <p class="hint">
         在
         <a href="https://open.feishu.cn/app" target="_blank" rel="noopener">飞书开放平台</a>
-        创建一个「企业自建应用」，开通电子表格相关权限并发布，再把应用加为你这份表格的协作者。
+        创建一个「企业自建应用」，按你用的表格类型开通对应权限（电子表格搜索 sheets，多维表格搜索
+        bitable，把读写记录/行相关权限都勾上；表格嵌在知识库里的话再加上 wiki 的「获取知识库节点信息」
+        权限）并发布，再把应用加为你这份表格的协作者。
       </p>
       <label>App ID <input type="text" id="appId" /></label>
       <label>App Secret <input type="password" id="appSecret" /></label>
@@ -23,30 +25,38 @@
     <section>
       <h2>2. 表格链接</h2>
       <p class="hint">
-        打开你要记录数据的那个分表标签页，直接把浏览器地址栏的完整链接复制过来，插件会自动解析。
-        支持知识库里嵌的电子表格（<code>/wiki/...?sheet=...</code>）和独立电子表格
-        （<code>/sheets/...?sheet=...</code>）两种链接。
+        打开你要记录数据的那个分表/数据表标签页，直接把浏览器地址栏的完整链接复制过来，插件会自动识别
+        是电子表格还是多维表格，不用另外选。支持 4 种链接：
       </p>
-      <label>表格链接 <input type="text" id="sheetUrl" placeholder="https://xxx.feishu.cn/wiki/xxx?sheet=xxx" /></label>
+      <p class="hint">
+        电子表格 —— 知识库里嵌的：<code>/wiki/...?sheet=...</code>，独立的：<code>/sheets/...?sheet=...</code><br />
+        多维表格 —— 知识库里嵌的：<code>/wiki/...?table=...</code>，独立的：<code>/base/...?table=...</code>
+      </p>
+      <label>表格链接 <input type="text" id="sheetUrl" placeholder="https://xxx.feishu.cn/wiki/xxx?table=xxx 或 ?sheet=xxx" /></label>
     </section>
 
     <section>
-      <h2>3. 列位置</h2>
+      <h2>3. 列 / 字段</h2>
       <p class="hint">
-        5 个字段各自填一个列，想放哪列都行，不用挨着；哪个字段留空，插件就完全不碰那一列
-        （比如不想让插件写图片链接，把「商品图片链接列」清空就行）。中间随便插几列自己手填的信息
-        （团员、cn、个数、QQ号……）插件也不会动。
+        如果上面填的是<b>电子表格</b>链接，这里每项填一个列字母（A/B/C…）；如果填的是<b>多维表格</b>
+        链接，这里改填字段的名字（要跟表格里的字段名一字不差，包括看不见的空格）。5 项各自独立，想放
+        哪列/哪个字段都行，不用挨着；哪项留空，插件就完全不碰对应的列/字段（比如不想让插件写图片，把
+        「商品图片」清空就行）。其他自己手填的列/字段（团员、cn、个数、QQ号……）插件也不会动。
       </p>
-      <label>商品名称列 <input type="text" id="colName" placeholder="A" /></label>
-      <label>商品图片链接列 <input type="text" id="colImage" placeholder="B" /></label>
-      <label>商品链接列（插件靠这一列去重，必填） <input type="text" id="colLink" placeholder="C" /></label>
-      <label>平时价格列 <input type="text" id="colNormalPrice" placeholder="D" /></label>
-      <label>实际价格列 <input type="text" id="colActualPrice" placeholder="E" /></label>
-      <label>表头行号（默认 1，数据从下一行开始） <input type="text" id="headerRow" placeholder="1" /></label>
+      <label>商品名称 <input type="text" id="colName" placeholder="A 或 名称" /></label>
+      <label>商品图片（多维表格下必须是「附件」类型的字段，插件会把图片上传上去而不是存链接）
+        <input type="text" id="colImage" placeholder="B 或 图片" />
+      </label>
+      <label>商品链接（插件靠这一项去重，必填） <input type="text" id="colLink" placeholder="C 或 商品链接" /></label>
+      <label>平时价格 <input type="text" id="colNormalPrice" placeholder="D 或 平时价格" /></label>
+      <label>实际价格 <input type="text" id="colActualPrice" placeholder="E 或 实际价格" /></label>
+      <label>表头行号（仅电子表格用得到，默认 1，数据从下一行开始；多维表格没有这个概念，可以不填）
+        <input type="text" id="headerRow" placeholder="1" />
+      </label>
 
       <p class="hint">
-        表头随你怎么写怎么改，插件不看列名。如果还没想好，可以先在表格第 1 行抄一份类似这样的（照抄或者
-        自己删改都行）：
+        电子表格的表头随你怎么写怎么改，插件不看列名，只看你上面填的列字母。如果还没想好，可以先在表格
+        第 1 行抄一份类似这样的（照抄或者自己删改都行）：
       </p>
       <p class="hint"><code>名称 | 图片 | 链接 | 平时价格 | 实际价格 | cn | 个数 | QQ号</code></p>
     </section>

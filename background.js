@@ -76,10 +76,11 @@ async function getTenantAccessToken(appId, appSecret) {
   return tokenCache.token;
 }
 
-// A Wiki node token isn't a spreadsheetToken — resolve it once via the wiki API and
-// cache the mapping locally (it never changes for a given doc).
-async function resolveSpreadsheetToken(token, parsed) {
-  if (parsed.type === "sheets") return parsed.token;
+// A Wiki node token isn't the underlying spreadsheetToken/appToken — resolve it once
+// via the wiki API and cache the mapping locally (it never changes for a given doc).
+// Handles both products: parsed.product says which obj_type to expect back.
+async function resolveObjToken(token, parsed) {
+  if (!parsed.isWiki) return parsed.token;
 
   const cacheKey = `wikiToken:${parsed.token}`;
   const cached = await chrome.storage.local.get(cacheKey);
@@ -92,8 +93,10 @@ async function resolveSpreadsheetToken(token, parsed) {
   );
   const node = data.data && data.data.node;
   if (!node || !node.obj_token) throw new Error("知识库链接解析结果里没有找到表格");
-  if (node.obj_type && node.obj_type !== "sheet") {
-    throw new Error(`这个知识库节点不是电子表格（类型是 ${node.obj_type}），请确认链接是否正确`);
+  const expectedType = parsed.product === "bitable" ? "bitable" : "sheet";
+  if (node.obj_type && node.obj_type !== expectedType) {
+    const expectedLabel = parsed.product === "bitable" ? "多维表格" : "电子表格";
+    throw new Error(`这个知识库节点不是${expectedLabel}（类型是 ${node.obj_type}），请确认链接是否正确`);
   }
   await chrome.storage.local.set({ [cacheKey]: node.obj_token });
   return node.obj_token;
@@ -101,6 +104,10 @@ async function resolveSpreadsheetToken(token, parsed) {
 
 function sheetsUrl(spreadsheetToken, suffix) {
   return `${FEISHU_HOST}/open-apis/sheets/v2/spreadsheets/${spreadsheetToken}${suffix}`;
+}
+
+function bitableUrl(appToken, suffix) {
+  return `${FEISHU_HOST}/open-apis/bitable/v1/apps/${appToken}${suffix}`;
 }
 
 async function getSheetMeta(token, spreadsheetToken) {
@@ -154,6 +161,117 @@ async function writeRange(token, spreadsheetToken, range, row) {
   );
 }
 
+async function getBitableTables(token, appToken) {
+  const data = await feishuRequest(
+    bitableUrl(appToken, "/tables"),
+    { headers: { Authorization: `Bearer ${token}` } },
+    "读取多维表格信息失败"
+  );
+  return (data.data && data.data.items) || [];
+}
+
+// Finds records whose `linkFieldName` field equals `linkValue` exactly — this is the
+// Bitable equivalent of the Sheets version's "read the whole link column and compare
+// locally", but done server-side via a filtered query instead of pulling ~5000 rows.
+async function searchBitableRecords(token, appToken, tableId, linkFieldName, linkValue) {
+  const data = await feishuRequest(
+    bitableUrl(appToken, `/tables/${tableId}/records/search`),
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({
+        field_names: [linkFieldName],
+        filter: {
+          conjunction: "and",
+          conditions: [{ field_name: linkFieldName, operator: "is", value: [linkValue] }],
+        },
+      }),
+    },
+    "查重失败"
+  );
+  return (data.data && data.data.items) || [];
+}
+
+async function createBitableRecord(token, appToken, tableId, fields) {
+  const data = await feishuRequest(
+    bitableUrl(appToken, `/tables/${tableId}/records`),
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ fields }),
+    },
+    "新建记录失败"
+  );
+  return data.data.record;
+}
+
+async function updateBitableRecord(token, appToken, tableId, recordId, fields) {
+  const data = await feishuRequest(
+    bitableUrl(appToken, `/tables/${tableId}/records/${recordId}`),
+    {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ fields }),
+    },
+    "更新记录失败"
+  );
+  return data.data.record;
+}
+
+function guessImageExt(url, mimeType) {
+  const fromUrl = (url.match(/\.(jpe?g|png|gif|bmp)(?:$|\?)/i) || [])[1];
+  if (fromUrl) return "." + fromUrl.toLowerCase().replace("jpeg", "jpg");
+  if (mimeType === "image/png") return ".png";
+  if (mimeType === "image/gif") return ".gif";
+  return ".jpg";
+}
+
+// Bitable's "attachment" field (used here to get a real thumbnail, unlike a plain
+// text/URL field) needs the actual file bytes uploaded to Feishu's drive first —
+// there's no equivalent of the Sheets side's "=IMAGE(url)" trick that lets Feishu
+// fetch the image itself. So: download the image from the product page's site, then
+// re-upload those bytes to Feishu. This is why host_permissions had to widen to all
+// sites (manifest.json) — a background fetch to an arbitrary shopping site only
+// bypasses that site's CORS restrictions when the extension actually holds a host
+// permission covering it.
+async function uploadImageToBitable(token, appToken, imageUrl) {
+  let resp;
+  try {
+    resp = await fetch(imageUrl);
+  } catch (err) {
+    throw new Error(`下载图片失败（${err.message}），可能是图片站有防盗链限制`);
+  }
+  if (!resp.ok) throw new Error(`下载图片失败（HTTP ${resp.status}），可能是图片站有防盗链限制`);
+  const blob = await resp.blob();
+
+  const fileName = `image${guessImageExt(imageUrl, blob.type)}`;
+  const form = new FormData();
+  form.append("file_name", fileName);
+  form.append("parent_type", "bitable_image");
+  form.append("parent_node", appToken);
+  form.append("size", String(blob.size));
+  form.append("file", blob, fileName);
+
+  let uploadResp;
+  try {
+    uploadResp = await fetch(`${FEISHU_HOST}/open-apis/drive/v1/medias/upload_all`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+  } catch (err) {
+    throw new Error(`上传图片到飞书失败（${err.message}）`);
+  }
+  let data;
+  try {
+    data = await uploadResp.json();
+  } catch (err) {
+    throw new Error(`上传图片到飞书失败：返回了无法解析的内容（HTTP ${uploadResp.status}）`);
+  }
+  if (data.code !== 0) throw new Error(`上传图片到飞书失败：${data.msg || `错误码 ${data.code}`}`);
+  return { file_token: data.data.file_token, name: fileName };
+}
+
 // Feishu Sheets renders a thumbnail for a cell whose value is an IMAGE() formula —
 // confirmed by live testing. It does NOT support .webp images (fixWebpUrl in
 // popup.js already rewrites 駿河屋's webp links to jpg before this ever sees them);
@@ -168,7 +286,7 @@ function imageFormula(url) {
   return { type: "formula", text: `=IMAGE("${url.replace(/"/g, "")}")` };
 }
 
-async function prepareSheetContext() {
+async function prepareContext() {
   const settings = await getSettings();
   const { appId, appSecret, sheetUrl } = settings;
   if (!appId || !appSecret || !sheetUrl) {
@@ -176,22 +294,69 @@ async function prepareSheetContext() {
   }
   const parsed = parseSheetUrl(sheetUrl);
   if (!parsed) throw new Error("表格链接格式无法识别，请重新从浏览器地址栏复制完整链接");
-  if (!parsed.sheetId) throw new Error("链接里没有 ?sheet=xxx 参数，请确认复制的是分表标签页的完整链接");
-  if (!settings.colLink) throw new Error("请先在插件设置里填「商品链接」对应的列，插件靠它去重");
+  if (parsed.product === "sheets" && !parsed.sheetId) {
+    throw new Error("链接里没有 ?sheet=xxx 参数，请确认复制的是分表标签页的完整链接");
+  }
+  if (parsed.product === "bitable" && !parsed.tableId) {
+    throw new Error("链接里没有 ?table=xxx 参数，请确认复制的是多维表格具体数据表标签页的完整链接");
+  }
+  if (!settings.colLink) {
+    const what = parsed.product === "bitable" ? "字段名" : "列";
+    throw new Error(`请先在插件设置里填「商品链接」对应的${what}，插件靠它去重`);
+  }
 
   const token = await getTenantAccessToken(appId, appSecret);
-  const spreadsheetToken = await resolveSpreadsheetToken(token, parsed);
+  const objToken = await resolveObjToken(token, parsed);
   const headerRow = parseInt(settings.headerRow, 10) || 1;
 
   const columns = {};
   for (const id of COLUMN_FIELD_IDS) columns[id] = (settings[id] || "").trim();
 
-  return { token, spreadsheetToken, sheetId: parsed.sheetId, headerRow, columns };
+  return { token, objToken, parsed, headerRow, columns };
 }
 
 async function saveRecord(payload) {
-  const ctx = await prepareSheetContext();
-  const { token, spreadsheetToken, sheetId, headerRow, columns } = ctx;
+  const ctx = await prepareContext();
+  return ctx.parsed.product === "bitable" ? saveRecordBitable(ctx, payload) : saveRecordSheets(ctx, payload);
+}
+
+async function saveRecordBitable(ctx, payload) {
+  const { token, objToken, parsed, columns } = ctx;
+  const link = normalizeLink(payload.link);
+  const linkField = columns.colLink;
+
+  const matches = await searchBitableRecords(token, objToken, parsed.tableId, linkField, link);
+  const existing = matches[0];
+
+  const fields = { [linkField]: link };
+  if (columns.colName && payload.name) fields[columns.colName] = payload.name;
+  if (columns.colNormalPrice && payload.normalPrice != null) fields[columns.colNormalPrice] = payload.normalPrice;
+  if (columns.colActualPrice && payload.actualPrice != null) fields[columns.colActualPrice] = payload.actualPrice;
+
+  // Uploading the image is the one step that can fail on its own (hotlink protection,
+  // an image host that's down, an unsupported format) without that being a reason to
+  // lose the rest of the record — same "best effort" spirit as the Sheets side's
+  // IMAGE() formula, which also just shows #ERROR/#VALUE! instead of blocking the save.
+  let imageDebug = null;
+  if (columns.colImage && payload.image) {
+    try {
+      const uploaded = await uploadImageToBitable(token, objToken, payload.image);
+      fields[columns.colImage] = [uploaded];
+    } catch (err) {
+      imageDebug = `图片没有保存成功：${err.message}（其他字段已正常保存）`;
+    }
+  }
+
+  const record = existing
+    ? await updateBitableRecord(token, objToken, parsed.tableId, existing.record_id, fields)
+    : await createBitableRecord(token, objToken, parsed.tableId, fields);
+
+  return { updated: !!existing, row: null, recordId: record.record_id, imageDebug };
+}
+
+async function saveRecordSheets(ctx, payload) {
+  const { token, objToken: spreadsheetToken, headerRow, columns } = ctx;
+  const sheetId = ctx.parsed.sheetId;
 
   const link = normalizeLink(payload.link);
   const dataStartRow = headerRow + 1;
@@ -247,16 +412,23 @@ async function saveRecord(payload) {
   let imageDebug = null;
   if (fieldValues.colImage) {
     const col = columns.colImage;
-    imageDebug = await readCellRaw(token, spreadsheetToken, `${sheetId}!${col}${absoluteRow}:${col}${absoluteRow}`);
+    const raw = await readCellRaw(token, spreadsheetToken, `${sheetId}!${col}${absoluteRow}:${col}${absoluteRow}`);
+    imageDebug = `图片格子读回内容：${raw}`;
   }
 
   return { updated, row: absoluteRow, imageDebug };
 }
 
 async function testConnection() {
-  const ctx = await prepareSheetContext();
-  const sheets = await getSheetMeta(ctx.token, ctx.spreadsheetToken);
-  const match = sheets.find((s) => s.sheetId === ctx.sheetId);
+  const ctx = await prepareContext();
+  if (ctx.parsed.product === "bitable") {
+    const tables = await getBitableTables(ctx.token, ctx.objToken);
+    const match = tables.find((t) => t.table_id === ctx.parsed.tableId);
+    if (!match) throw new Error("在这个多维表格里没找到链接对应的数据表，确认没复制错标签页");
+    return { title: match.name };
+  }
+  const sheets = await getSheetMeta(ctx.token, ctx.objToken);
+  const match = sheets.find((s) => s.sheetId === ctx.parsed.sheetId);
   if (!match) throw new Error("在这个表格里没找到链接对应的分表（sheet），确认没复制错标签页");
   return { title: match.title };
 }

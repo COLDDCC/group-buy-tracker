@@ -21,7 +21,7 @@
   },
   "options_page": "options.html",
   "permissions": ["storage", "activeTab", "scripting"],
-  "host_permissions": ["https://open.feishu.cn/*"],
+  "host_permissions": ["https://open.feishu.cn/*", "http://*/*", "https://*/*"],
   "background": {
     "service_worker": "background.js"
   }
