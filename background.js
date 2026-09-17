@@ -187,7 +187,9 @@ async function searchBitableRecords(token, appToken, tableId, linkFieldName, lin
         },
       }),
     },
-    "查重失败"
+    // JSON.stringify (not the bare string) so an accidental leading/trailing space or
+    // full-width character shows up in the error message instead of being invisible.
+    `查重失败（用来去重的字段名是 ${JSON.stringify(linkFieldName)}，请确认表格里这个字段名一字不差）`
   );
   return (data.data && data.data.items) || [];
 }
@@ -200,7 +202,7 @@ async function createBitableRecord(token, appToken, tableId, fields) {
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
       body: JSON.stringify({ fields }),
     },
-    "新建记录失败"
+    `新建记录失败（写入的字段名是 ${JSON.stringify(Object.keys(fields))}，请确认表格里这些字段名一字不差）`
   );
   return data.data.record;
 }
@@ -213,7 +215,7 @@ async function updateBitableRecord(token, appToken, tableId, recordId, fields) {
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
       body: JSON.stringify({ fields }),
     },
-    "更新记录失败"
+    `更新记录失败（写入的字段名是 ${JSON.stringify(Object.keys(fields))}，请确认表格里这些字段名一字不差）`
   );
   return data.data.record;
 }
