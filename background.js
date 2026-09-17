@@ -51,7 +51,10 @@ async function feishuRequest(url, options, context, attempt = 1) {
       await sleep(attempt * 800);
       return feishuRequest(url, options, context, attempt + 1);
     }
-    throw new Error(`${context}：${data.msg || `错误码 ${data.code}`}`);
+    // Always include the numeric code alongside the message — a bare message like
+    // "Forbidden" is too generic to act on by itself, but the code maps to a specific,
+    // look-up-able reason in Feishu's own error code reference.
+    throw new Error(`${context}：${data.msg || "未知错误"}（错误码 ${data.code}）`);
   }
   return data;
 }
